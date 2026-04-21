@@ -11,12 +11,16 @@ use crate::protocol::*;
 mod render;
 use crate::render::render;
 
+mod texture_cache;
+use crate::texture_cache::TextureCache;
+
+
 #[macroquad::main("Convoluted SQL Abomination")]
 async fn main() {
     // Create channels to talk between the threads
     let (request_sender, request_reciever) = mpsc::channel::<Request>();
     let (response_sender, response_receiver) = mpsc::channel::<Response>();
-
+    
     // Start listening to database requests
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -30,12 +34,15 @@ async fn main() {
     let mut loading = true;
 
     let mut draw_state = Vec::new();
+    let mut texture_cache = TextureCache::new();
 
     // Request first tick
-    let _ = request_sender.send(Request::Tick(0.0));
+    let _ = request_sender.send(Request::Tick { delta_time: 0.0, input: Vec::new() });
 
     loop {
         let delta_time: f64 = get_frame_time().into();
+
+        let input: Vec<String> = get_keys_down().iter().map(|key| format!("{:?}", key).to_lowercase()).collect();
 
         // Loading screen for database startup
         if loading {
@@ -47,8 +54,8 @@ async fn main() {
 
             Ok(Response::Tick(draw_commands)) => {
                 draw_state = draw_commands;
-
-                let _ = request_sender.send(Request::Tick(delta_time));
+                
+                let _ = request_sender.send(Request::Tick { delta_time, input });
             }
 
             Err(TryRecvError::Empty) => {} // No message this frame
@@ -58,7 +65,7 @@ async fn main() {
             }
         }
 
-        render(&draw_state);
+        render(&draw_state, &mut texture_cache).await;
 
         next_frame().await;
     }

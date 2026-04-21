@@ -26,6 +26,10 @@ pub async fn db_worker(request_reciever: mpsc::Receiver<Request>, response_sende
     let pool = PgPool::connect(&url).await.unwrap();
 
     // Initialize
+    sqlx::raw_sql(include_str!("init.sql"))
+        .execute(&pool)
+        .await?;
+
     sqlx::raw_sql(include_str!("main.sql"))
         .execute(&pool)
         .await?;
@@ -37,15 +41,18 @@ pub async fn db_worker(request_reciever: mpsc::Receiver<Request>, response_sende
     // Handle requests
     while let Ok(req) = request_reciever.recv() {
         match req {
-            Request::Tick(delta_time) => {
-                sqlx::query("CALL update($1)")
+            Request::Tick { delta_time, input } => {
+                sqlx::query("CALL update($1, $2)")
                     .bind(delta_time)
+                    .bind(input)
                     .execute(&pool)
                     .await?;
 
-                let draw_commands: Vec<DrawCommand> = sqlx::query_as("SELECT * FROM draw_commands")
+                let draw_command_rows: Vec<DrawCommandRow> = sqlx::query_as("SELECT * FROM draw_commands")
                     .fetch_all(&pool)
                     .await?;
+
+                let draw_commands = draw_command_rows.into_iter().map(|row| DrawCommand::from(row)).collect();
                 
                 let _ = response_sender.send(Response::Tick(draw_commands));
             }

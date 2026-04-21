@@ -1,36 +1,30 @@
-CREATE TABLE data (
-    num FLOAT
-);
-
-CREATE TABLE draw_commands (
-    id SERIAL PRIMARY KEY,
-    x FLOAT4,
-    y FLOAT4,
-    text_content TEXT
-);
-
 CREATE PROCEDURE init()
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    INSERT INTO data (num) VALUES (0.0);
-    INSERT INTO draw_commands (x, y, text_content) VALUES (50, 50, 'Number is 0');
+    INSERT INTO draw_commands (kind, x, y, width, height, sprite_path)
+    VALUES ('sprite', 50, 50, 100, 100, 'src/placeholder.png');
 END;
 $$;
 
-CREATE PROCEDURE update(delta_time FLOAT)
+CREATE PROCEDURE update(delta_time FLOAT, input TEXT[])
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    current_num FLOAT;
+    player_x FLOAT;
+    pressed_key TEXT;
 BEGIN
-    UPDATE data SET num = num + delta_time;
+    SELECT x INTO player_x FROM draw_commands WHERE id = 1;
+    FOREACH pressed_key IN ARRAY input LOOP
+        CASE pressed_key
+            WHEN 'left' THEN
+                player_x = player_x - 1;
+            WHEN 'right' THEN
+                player_x = player_x + 1;
+            ELSE -- No else
+        END CASE;
+    END LOOP;
 
-    -- Display
-    SELECT num INTO current_num FROM data LIMIT 1;
-
-    UPDATE draw_commands
-    SET text_content = CONCAT('Number is ', current_num::TEXT)
-    WHERE id = 1;
+    UPDATE draw_commands SET x = player_x;
 END;
 $$;
