@@ -1,28 +1,15 @@
-use anyhow::Result;
 use macroquad::prelude::*;
-use postgresql_embedded::PostgreSQL;
-use sqlx::prelude::FromRow;
-use sqlx::{PgPool};
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
-#[derive(Debug, FromRow)]
-struct DrawCommand {
-    x: f32,
-    y: f32,
-    text_content: String,
-}
+mod db;
+use crate::db::db_worker;
 
-#[derive(Debug)]
-enum Request {
-    Tick(f64),
-}
+mod protocol;
+use crate::protocol::*;
 
-#[derive(Debug)]
-enum Response {
-    Ready,
-    Tick(Vec<DrawCommand>),
-}
+mod render;
+use crate::render::render;
 
 #[macroquad::main("Convoluted SQL Abomination")]
 async fn main() {
@@ -74,61 +61,5 @@ async fn main() {
         render(&draw_state);
 
         next_frame().await;
-    }
-}
-
-async fn db_worker(request_reciever: mpsc::Receiver<Request>, response_sender: mpsc::Sender<Response>) -> Result<()> {
-    // Start the server
-    let mut postgresql = PostgreSQL::default();
-
-    postgresql.setup().await.unwrap();
-    postgresql.start().await.unwrap();
-
-    let db = "sql-game";
-
-    // Delete the old database if it exists before creating the new one for this session
-    if postgresql.database_exists(db).await.unwrap() {
-        postgresql.drop_database(db).await.unwrap();
-    }
-
-    postgresql.create_database(db).await.unwrap();
-
-    let url = postgresql.settings().url(db);
-
-    let pool = PgPool::connect(&url).await.unwrap();
-
-    // Initialize
-    sqlx::raw_sql(include_str!("main.sql"))
-        .execute(&pool)
-        .await?;
-
-    sqlx::query("CALL init()").execute(&pool).await?;
-
-    let _ = response_sender.send(Response::Ready);
-
-    // Handle requests
-    while let Ok(req) = request_reciever.recv() {
-        match req {
-            Request::Tick(delta_time) => {
-                sqlx::query("CALL update($1)")
-                    .bind(delta_time)
-                    .execute(&pool)
-                    .await?;
-
-                let draw_commands: Vec<DrawCommand> = sqlx::query_as("SELECT * FROM draw_commands")
-                    .fetch_all(&pool)
-                    .await?;
-                
-                let _ = response_sender.send(Response::Tick(draw_commands));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn render(draw_commands: &Vec<DrawCommand>) {
-    for command in draw_commands.iter() {
-        draw_text(&command.text_content, command.x, command.y, 30.0, GREEN);
     }
 }
