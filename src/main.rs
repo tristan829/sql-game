@@ -1,21 +1,27 @@
 use anyhow::Result;
 use macroquad::prelude::*;
 use postgresql_embedded::PostgreSQL;
-use sqlx::{PgPool, Row};
-use std::sync::mpsc;
+use sqlx::prelude::FromRow;
+use sqlx::{PgPool};
+use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
+
+#[derive(Debug, FromRow)]
+struct DrawCommand {
+    x: f32,
+    y: f32,
+    text_content: String,
+}
 
 #[derive(Debug)]
 enum Request {
-    Update { delta_time: f64 },
-    GetNum,
+    Tick(f64),
 }
 
 #[derive(Debug)]
 enum Response {
     Ready,
-    Ok,
-    Num(f64),
+    Tick(Vec<DrawCommand>),
 }
 
 #[macroquad::main("Convoluted SQL Abomination")]
@@ -35,31 +41,37 @@ async fn main() {
     });
 
     let mut loading = true;
-    let mut num = 0f64;
+
+    let mut draw_state = Vec::new();
+
+    // Request first tick
+    let _ = request_sender.send(Request::Tick(0.0));
 
     loop {
         let delta_time: f64 = get_frame_time().into();
 
-        // Handle responses
-        while let Ok(msg) = response_receiver.try_recv() {
-            match msg {
-                Response::Ready => loading = false,
-                Response::Num(v) => num = v,
-                Response::Ok => {}
+        // Loading screen for database startup
+        if loading {
+            draw_text("Loading SQL...", 50.0, 50.0, 30.0, WHITE);
+        }
+
+        match response_receiver.try_recv() {
+            Ok(Response::Ready) => loading = false,
+
+            Ok(Response::Tick(draw_commands)) => {
+                draw_state = draw_commands;
+
+                let _ = request_sender.send(Request::Tick(delta_time));
+            }
+
+            Err(TryRecvError::Empty) => {} // No message this frame
+
+            Err(TryRecvError::Disconnected) => {
+                panic!("DB worker thread disconnected");
             }
         }
 
-        // Draw
-        if loading {
-            draw_text("Loading SQL...", 50.0, 50.0, 30.0, WHITE);
-        } else {
-            draw_text(&format!("num = {}", num), 50.0, 50.0, 30.0, GREEN);
-
-            // Update for next frame
-            let _ = request_sender.send(Request::Update { delta_time });
-            let _ = request_sender.send(Request::GetNum);
-        }
-        
+        render(&draw_state);
 
         next_frame().await;
     }
@@ -97,21 +109,26 @@ async fn db_worker(request_reciever: mpsc::Receiver<Request>, response_sender: m
     // Handle requests
     while let Ok(req) = request_reciever.recv() {
         match req {
-            Request::Update { delta_time } => {
-                sqlx::query("CALL update($1)").bind(delta_time).execute(&pool).await?;
-                let _ = response_sender.send(Response::Ok);
-            }
-
-            Request::GetNum => {
-                let row = sqlx::query("SELECT num FROM output LIMIT 1")
-                    .fetch_one(&pool)
+            Request::Tick(delta_time) => {
+                sqlx::query("CALL update($1)")
+                    .bind(delta_time)
+                    .execute(&pool)
                     .await?;
 
-                let v: f64 = row.get("num");
-                let _ = response_sender.send(Response::Num(v));
+                let draw_commands: Vec<DrawCommand> = sqlx::query_as("SELECT * FROM draw_commands")
+                    .fetch_all(&pool)
+                    .await?;
+                
+                let _ = response_sender.send(Response::Tick(draw_commands));
             }
         }
     }
 
     Ok(())
+}
+
+fn render(draw_commands: &Vec<DrawCommand>) {
+    for command in draw_commands.iter() {
+        draw_text(&command.text_content, command.x, command.y, 30.0, GREEN);
+    }
 }
