@@ -1,0 +1,11 @@
+[package]
+name = "sql-game"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+macroquad = "0.4.14"
+postgresql_embedded = { version = "0.20.0", features = ["blocking"] }
+sqlx = "0.8.6"
+tokio = "1.52.1"
