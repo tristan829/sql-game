@@ -2,6 +2,9 @@ use macroquad::prelude::*;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
+mod constants;
+use crate::constants::*;
+
 mod db;
 use crate::db::db_worker;
 
@@ -14,8 +17,17 @@ use crate::render::render;
 mod texture_cache;
 use crate::texture_cache::TextureCache;
 
+fn window_conf() -> Conf {
+    Conf {
+        window_title: "Convoluted SQL Abomination".to_owned(),
+        window_width: WINDOW_WIDTH,
+        window_height: WINDOW_HEIGHT,
+        window_resizable: false,
+        ..Default::default()
+    }
+}
 
-#[macroquad::main("Convoluted SQL Abomination")]
+#[macroquad::main(window_conf)]
 async fn main() {
     // Create channels to talk between the threads
     let (request_sender, request_reciever) = mpsc::channel::<Request>();

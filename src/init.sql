@@ -4,6 +4,7 @@ CREATE TYPE draw_command_kind AS ENUM ('text', 'sprite');
 
 CREATE TABLE draw_commands (
     id SERIAL PRIMARY KEY,
+    tag TEXT,
 
     x FLOAT4,
     y FLOAT4,
@@ -18,3 +19,8 @@ CREATE TABLE draw_commands (
     height FLOAT4,
     sprite_path TEXT
 );
+
+CREATE TABLE window_config AS
+SELECT
+    480 AS width,
+    360 AS height;
