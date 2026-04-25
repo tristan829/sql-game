@@ -4,7 +4,8 @@ CREATE TABLE game_data (
     fall_speed FLOAT DEFAULT 200,
     time_elapsed FLOAT DEFAULT 0,
     last_object_spawn_time FLOAT DEFAULT 0,
-    points INT DEFAULT 0
+    points INT DEFAULT 0,
+    dead BOOLEAN DEFAULT FALSE
 );
 
 CREATE PROCEDURE init()
@@ -36,8 +37,13 @@ BEGIN
     SELECT width  INTO window_width  FROM window_config;
     SELECT height INTO window_height FROM window_config;
 
-    INSERT INTO draw_commands (kind, tag, x, y, width, height, sprite_path)
-    VALUES ('sprite', 'falling_object', random(0, window_width - 50), -50, 50, 50, 'src/apple.png');
+    IF random() < 0.2 THEN
+        INSERT INTO draw_commands (kind, tag, x, y, width, height, sprite_path)
+        VALUES ('sprite', 'falling_object_bomb', random(0, window_width - 50), -50, 50, 50, 'src/bomb.png');
+    ELSE
+        INSERT INTO draw_commands (kind, tag, x, y, width, height, sprite_path)
+        VALUES ('sprite', 'falling_object', random(0, window_width - 50), -50, 50, 50, 'src/apple.png');
+    END IF;
 END;
 $$;
 
@@ -57,13 +63,39 @@ DECLARE
 
     player_points INT;
     added_points INT;
+
+    player_dead BOOLEAN;
 BEGIN
+
     SELECT width INTO window_width FROM window_config;
 
-    SELECT player_speed, time_elapsed, fall_speed, last_object_spawn_time, points
-    INTO player_move_speed, elapsed, object_fall_speed, last_spawn, player_points
+    SELECT player_speed, time_elapsed, fall_speed, last_object_spawn_time, points, dead
+    INTO player_move_speed, elapsed, object_fall_speed, last_spawn, player_points, player_dead
     FROM game_data
     WHERE id = 1;
+
+    IF player_dead THEN
+        -- Draw game over screen
+        DELETE FROM draw_commands;
+
+        INSERT INTO draw_commands (kind, tag, x, y, text_content)
+        VALUES ('text', 'game_over_text', 25, 100, CONCAT('You died! You got a score of ', player_points));
+
+        INSERT INTO draw_commands (kind, tag, x, y, text_content)
+        VALUES ('text', 'game_over_restart_prompt', 25, 150, 'Press Space to restart');
+
+        FOREACH pressed_key IN ARRAY input LOOP
+            CASE pressed_key
+                WHEN 'space' THEN
+                    DELETE FROM draw_commands;
+                    DELETE FROM game_data;
+                    CALL init();
+                    RETURN;
+                ELSE
+                    NULL;
+            END CASE;
+        END LOOP;
+    END IF;
 
     elapsed := elapsed + delta_time;
 
@@ -96,9 +128,30 @@ BEGIN
 
     UPDATE draw_commands
     SET y = y + object_fall_speed * delta_time
-    WHERE tag = 'falling_object';
+    WHERE tag = 'falling_object' OR tag = 'falling_object_bomb';
+
 
     -- Collision
+
+    -- Bombs
+    WITH collided AS (
+        DELETE FROM draw_commands o
+        USING draw_commands p
+        WHERE p.tag = 'player'
+        AND o.tag = 'falling_object_bomb'
+        AND o.x < p.x + 100
+        AND o.x + 50 > p.x
+        AND o.y < p.y + 100
+        AND o.y + 50 > p.y
+        RETURNING 1
+    )
+    SELECT COUNT(*) INTO added_points
+    FROM collided;
+    IF added_points >= 1 THEN
+        UPDATE game_data SET dead = TRUE WHERE id = 1;
+    END IF;
+
+    -- Points
     WITH collided AS (
         DELETE FROM draw_commands o
         USING draw_commands p
